@@ -1,0 +1,450 @@
+`timescale 1ns / 1ps
+
+module microprocessor(       
+    input wire mclk,reset,
+    input wire [3:0] opcode, 
+    input wire [11:0] RdRsRt ); 
+    
+    wire [7:0] PC_addr, D_addr, RF_w_data;
+    wire [3:0] RF_w_addr, RF_rp_addr, RF_rq_addr; 
+    wire D_addr_sel, D_rd, D_wr, RF_s1, RF_s0, W_wr, Rp_rd, Rq_rd;
+    wire [1:0] ALU_s; 
+    
+    Control_unit ctrl(PC_addr, IR_ld,D_addr_sel, D_rd, D_wr, RF_s1, RF_s0, W_wr, Rp_rd, Rq_rd,ALU_s, D_addr, RF_w_data, RF_w_addr, RF_rp_addr, RF_rq_addr, mclk,opcode, RdRsRt );
+
+    Datapath data(mclk, reset, opcode,IR_ld,D_addr_sel, D_rd, D_wr, RF_s0, RF_s1, W_wr, Rp_rd, Rq_rd, PC_addr, D_addr, RF_w_data, RF_w_addr, RF_rp_addr, RF_rq_addr, ALU_s); 
+endmodule   
+
+// Control Unit ====================
+ module Control_unit(
+     output reg [7:0] PC_addr, 
+     output reg IR_ld,D_addr_sel, D_rd, D_wr, RF_s1, RF_s0, W_wr, Rp_rd, Rq_rd,
+     output reg [1:0] ALU_s, 
+     output reg [7:0] D_addr, RF_w_data, 
+     output reg [3:0] RF_w_addr, RF_rp_addr, RF_rq_addr,   
+     input mclk,
+     input [3:0] opcode,     
+     input [11:0] RdRsRt );
+     
+     wire [7:0] MUX2to1_out;
+     wire [15:0] Full;
+     wire [15:0] R_data, W_data;
+     
+     IR ir111(Full, R_data, IR_ld, mclk);      
+     MUX2to1 mux111(MUX2to1_out, PC_addr, D_addr, D_addr_sel); 
+     RAM ram111(R_data, W_data, MUX2to1_out, mclk, D_rd, D_wr);
+     
+     always@(opcode)  begin 
+         case(opcode) 
+             4'b1001: 
+             begin: LoadWord                
+                 PC_addr=0; D_addr_sel=1; D_addr={RdRsRt[7:0]};                  
+                 D_rd=1; D_wr=0; 
+                 RF_w_data=0; RF_s0=0; RF_s1=1;  
+                 RF_w_addr={RdRsRt[11:8]}; W_wr=1;
+                 RF_rp_addr=0; Rp_rd=0;
+                 RF_rq_addr=0; Rq_rd=0; 
+                 ALU_s=2'b11;               
+             end 
+        
+            4'b0000: 
+            begin: ADD
+                PC_addr=0; D_addr_sel=0; D_addr=0; 
+                D_rd=0; D_wr=0;
+                RF_w_data=1; RF_s0=0; RF_s1=0;                               
+                RF_w_addr={RdRsRt[11:8]}; W_wr=1; 
+                RF_rp_addr={RdRsRt[3:0]}; Rp_rd=1; 
+                RF_rq_addr={RdRsRt[7:4]}; Rq_rd=1; 
+                ALU_s=2'b01;                           
+            end
+      
+              4'b1010: 
+              begin: StoreWord
+                  PC_addr=0; D_addr_sel=1; D_addr={RdRsRt[11:4]}; 
+                  D_rd=0; D_wr=1;                                                    
+                  RF_w_data=0; RF_s0=0; RF_s1=0;                                                 
+                  RF_w_addr=0; W_wr=0;
+                  RF_rp_addr={RdRsRt[3:0]}; Rp_rd=1;
+                  RF_rq_addr=0; Rq_rd=0; 
+                  ALU_s=2'b00;
+              end 
+              
+            4'b1000: 
+              begin: LoadImmediate               
+                  PC_addr=0; D_addr_sel=1; D_addr={RdRsRt[7:0]};                  
+                  D_rd=1; D_wr=0; 
+                  RF_w_data=0; RF_s0=0; RF_s1=1;  
+                  RF_w_addr={RdRsRt[11:8]}; W_wr=1;
+                  RF_rp_addr=0; Rp_rd=0;
+                  RF_rq_addr=0; Rq_rd=0; 
+                  ALU_s=2'b11;               
+              end 
+              4'b1011: 
+                  begin: SUBTRACT
+                      PC_addr=0; D_addr_sel=0; D_addr=0; 
+                      D_rd=0; D_wr=0;
+                      RF_w_data=1; RF_s0=0; RF_s1=0;                               
+                      RF_w_addr={RdRsRt[11:8]}; W_wr=1; 
+                      RF_rp_addr={RdRsRt[3:0]}; Rp_rd=1; 
+                      RF_rq_addr={RdRsRt[7:4]}; Rq_rd=1; 
+                      ALU_s=2'b10;    
+                 end
+        endcase 
+    end 
+    assign Full={opcode, RF_w_addr, RF_rp_addr, RF_rq_addr};
+    
+    
+endmodule
+       
+//Data Path ======================
+module Datapath(
+    input wire mclk, reset, 
+    input wire [3:0] opcode, 
+    input wire IR_ld, D_addr_sel, D_rd, D_wr, RF_s0, RF_s1, W_wr, Rp_rd, Rq_rd,
+    input wire [7:0] PC_addr, D_addr, RF_w_data,
+    input wire [3:0] RF_w_addr, RF_rp_addr, RF_rq_addr, 
+    input wire [1:0] ALU_s );
+           
+    wire [7:0] MUX2to1_out; 
+    wire [15:0] MUX3to1_out;
+    
+    wire [15:0] W_data, R_data;
+         
+    wire [15:0] Rp_data, Rq_data, alu_out;
+    wire [15:0] Full;
+          
+       
+    MUX2to1 mux1(MUX2to1_out, PC_addr, D_addr, D_addr_sel); 
+    RAM ram1(R_data, W_data, MUX2to1_out, mclk, D_rd, D_wr);
+    MUX3to1 mux2(MUX3to1_out, alu_out, R_data, RF_w_data, RF_s0, RF_s1); 
+    RF rf1(Rp_data, Rq_data, RF_w_addr, RF_rp_addr, RF_rq_addr, mclk, W_wr, Rp_rd, Rq_rd, W_data); 
+    ALU alu1(alu_out, Rp_data, Rq_data, ALU_s); 
+              
+    
+    assign Full={opcode, RF_w_addr, RF_rp_addr, RF_rq_addr};
+endmodule
+       
+            
+// Prgram Counter (PC) ==========================
+module PC(
+    output reg [7:0] PC_out,     
+    input PC_ld, PC_clr, PC_inc, 
+    input [7:0] PC_plus,
+    input mclk, reset ); 
+           
+    always@(posedge mclk or posedge reset) begin
+        if(reset || PC_clr) 
+            PC_out <= 8'b0000_0000;
+        else  begin
+            if(PC_ld)  begin
+                if(PC_inc)  
+                    PC_out <= PC_out + 8'b0000_0001; 
+                else PC_out <= PC_out + PC_plus; 
+            end    
+            else PC_out <= PC_out;
+        end
+    end 
+endmodule
+            
+//Instruction Register (IR) ================
+module IR(
+    output reg [15:0] IR_out, 
+    input [15:0] IR_in, 
+    input IR_ld, mclk);
+        
+    always@(posedge mclk)  begin 
+        if(IR_ld) 
+            IR_out <= IR_in;
+    end
+endmodule
+ 
+ 
+//Controller================================
+ module Controller(
+     output reg [3:0] RF_W_addr, RF_Rp_addr, RF_Rq_addr, 
+     output reg [7:0] D_addr, 
+     input [11:0] RdRsRt_data, 
+     input mclk ); 
+ 
+     always@(posedge mclk) begin
+         D_addr <= RdRsRt_data[7:0]; 
+         RF_W_addr <= RdRsRt_data[11:8]; 
+         RF_Rp_addr <= RdRsRt_data[7:4]; 
+         RF_Rq_addr <= RdRsRt_data[3:0];      
+     end
+endmodule 
+      
+ // 2x1 MUX ====================================
+module MUX2to1( 
+    output wire [7:0] Y, 
+    input [7:0] A, 
+    input [7:0] B, 
+    input S ); 
+       
+    assign Y = S?A:B;
+endmodule
+        
+ //RAM ===============================
+module RAM(
+    output [15:0] R_data, 
+    input [15:0] W_data,
+    input [7:0] MUX2to1_out, 
+    input mclk, D_rd, D_wr ); 
+
+    reg [15:0] mem_data; 
+    reg [15:0] mem [255:0]; 
+
+    always@(posedge mclk) 
+        begin : Write2Mem
+             if(D_wr) begin 
+                mem[MUX2to1_out] = W_data; 
+        end 
+    end 
+
+    always@(MUX2to1_out or D_rd)  
+        begin : Read4rmMem
+            mem[201]=16'h0003;
+            mem[202]=16'h0002;
+            mem[250]=16'h000F;
+    end
+   
+    assign R_data = (D_rd)?mem_data:16'hz;  // Memory Write Block 
+endmodule 
+                        
+        
+// 3x1 MUX ===================
+module MUX3to1( 
+    output wire [15:0] Y, 
+    input [15:0] A, B, 
+    input [7:0] C,
+    input S0, S1 );
+   
+    wire [15:0] w1; 
+    
+    MUX2to1 m10(w1,A,B,S0);
+    MUX2to1 m11(Y,w1,C,S1);
+endmodule
+                         
+ //Register FILE (RF) =================
+ module RF(
+    output reg [15:0] Rp_data, Rq_data,
+    input [3:0] W_addr, Rp_addr, Rq_addr, 
+    input mclk, W_wr, Rp_rd, Rq_rd, 
+    input [15:0] W_data );   
+    
+    reg [15:0] Reg [15:0]; 
+  
+    always@(posedge mclk) begin
+        if(W_wr==1) 
+            Reg[W_addr]= W_data; 
+        else 
+            Reg[W_addr]=0; 
+    end 
+    
+    always@(Rp_rd or Rq_rd) begin 
+        if(Rp_rd == 1 || Rq_rd == 1) begin
+            Rp_data = Reg[Rp_addr];
+            Rq_data = Reg[Rq_addr];
+        end 
+        else begin 
+            Rp_data=0;
+            Rq_data=0;  
+        end       
+    end
+endmodule
+         
+ //ALU ===========================
+module ALU(
+    output reg [15:0] Y, 
+    input [15:0] A, B, 
+    input [1:0] S );  
+              
+    always@(A or B) begin 
+        case(S)
+            2'b00: Y=A;
+            2'b01: Y=A+B; 
+            2'b10: Y=A-B;
+            2'b11: Y=A; 
+            
+        endcase
+    end 
+endmodule 
+
+// LEDs & 7 segments ====================
+module hw4(
+    output [15:0] LED,
+    output reg[6:0] a_to_g,
+    output reg [7:0] an,  
+    //output reg out,
+    //output sclk,
+    output [15:0] Y,
+    input  [11:0] A,
+    input  [11:0] B,
+    input [15:0] SW,
+    input reset,
+    input mclk);
+ 
+    reg out;
+    reg [7:0] AA;
+    reg [7:0] BB;    
+    reg [7:0] YY;
+    reg [7:0] mod;
+    
+    reg [2:0] num;
+    reg [1:0] cstate, nstate;
+    wire SlowClk;
+
+    parameter S0= 2'b00, S1= 2'b01, S2= 2'b10;
+
+
+// Reset (SW[4] ===========================
+    always @ (posedge mclk or posedge reset) begin
+        if ( SW[4] == 1) begin
+            AA <= 8'b0000_0000;
+            BB <= 8'b0000_0000;
+            cstate <= S0;
+            nstate <= S0;
+        end
+        else begin
+            AA<= 8'b00000010; // 60
+            BB<= 8'b00100100; // 36 ... YY=12d, 0x0C
+            cstate <= nstate;
+        end
+    end
+    
+// State Transition =================
+    always@(*) begin
+        case(cstate)
+            S0: if(SW[4]==0) nstate<= S1; 
+                else nstate <= S0;
+            S1: if(AA>BB) begin
+                    mod<=AA-BB;
+                    if(mod>0) begin 
+                        AA<=BB;
+                        BB<=mod; 
+                        YY<=BB;  
+                    end 
+                                                                     
+                else if(mod==0) begin
+                        nstate<=S2;
+                        YY<=BB;                         
+                end
+                   // YY<=BB;
+                end
+                else nstate <= S2;
+            S2: if(AA==BB) begin
+                    YY<= BB;
+                    nstate<=S0;
+                end 
+                else nstate <= S1;     
+        endcase
+    end
+    
+    
+// Output ==================
+    always@(cstate) begin
+        case(cstate)
+            S0: out<= 0; 
+            S1: out<= 0; 
+            S2: out<= 1; 
+        endcase
+    end    
+
+
+// Change placement of 7 segment display  ====
+    always @(posedge sclk) begin
+        case (num)
+            3'b000: an = 8'b11111110;
+            3'b001: an = 8'b11111101;   
+            3'b010: an = 8'b11111111;
+            3'b011: an = 8'b11111111; 
+            3'b100: an = 8'b11111111;
+            3'b101: an = 8'b11111111; 
+            3'b110: an = 8'b11111111;
+            3'b111: an = 8'b11111111;                
+            default: an = 8'b11111111;
+        endcase
+      
+        num <= num + 2'b01;
+    end
+
+
+// For each 7 segment display ===========
+    always @ (posedge mclk) begin       
+        case(num)
+            2'b00:
+                case (YY[3:0])
+                    4'b0000: a_to_g <= 7'b0000001; // 0
+                    4'b0001: a_to_g <= 7'b1001111; // 1
+                    4'b0010: a_to_g <= 7'b0010010; // 2
+                    4'b0011: a_to_g <= 7'b0000110; // 3
+                    4'b0100: a_to_g <= 7'b1001100; // 4
+                    4'b0101: a_to_g <= 7'b0100100; // 5
+                    4'b0110: a_to_g <= 7'b0100000; // 6
+                    4'b0111: a_to_g <= 7'b0001111; // 7
+                    4'b1000: a_to_g <= 7'b0000000; // 8
+                    4'b1001: a_to_g <= 7'b0001100; // 9
+                    4'b1010: a_to_g <= 7'b0001000; // A
+                    4'b1011: a_to_g <= 7'b1100000; // B
+                    4'b1100: a_to_g <= 7'b1110010; // C
+                    4'b1101: a_to_g <= 7'b1000010; // D
+                    4'b1110: a_to_g <= 7'b0110000; // E
+                    4'b1111: a_to_g <= 7'b0111000; // F
+                endcase
+       
+            2'b01:
+
+                case (YY[7:4])
+                    4'b0000: a_to_g <= 7'b0000001; // 0
+                    4'b0001: a_to_g <= 7'b1001111; // 1
+                    4'b0010: a_to_g <= 7'b0010010; // 2
+                    4'b0011: a_to_g <= 7'b0000110; // 3
+                    4'b0100: a_to_g <= 7'b1001100; // 4
+                    4'b0101: a_to_g <= 7'b0100100; // 5
+                    4'b0110: a_to_g <= 7'b0100000; // 6
+                    4'b0111: a_to_g <= 7'b0001111; // 7
+                    4'b1000: a_to_g <= 7'b0000000; // 8
+                    4'b1001: a_to_g <= 7'b0001100; // 9
+                    4'b1010: a_to_g <= 7'b0001000; // A
+                    4'b1011: a_to_g <= 7'b1100000; // B
+                    4'b1100: a_to_g <= 7'b1110010; // C
+                    4'b1101: a_to_g <= 7'b1000010; // D
+                    4'b1110: a_to_g <= 7'b0110000; // E
+                    4'b1111: a_to_g <= 7'b0111000; // F
+                endcase
+   
+          endcase
+    end // end always
+
+
+// Assign statements & module instantiation =======
+    assign LED=SW;
+    assign Y= YY;
+    assign A = AA;
+    assign B = BB;
+    SlowClk clk(sclk, mclk);
+endmodule
+
+
+// Clock =========
+module SlowClk(
+    output reg sclk,
+    input mclk);
+   
+    reg [31:0] counter;
+ 
+    initial begin
+        counter <= 32'h00000000;
+        sclk <= 0;
+    end
+ 
+    always@(posedge mclk) begin
+        counter <= counter + 32'h0000ffff;
+      
+        if (counter > 32'h99999999) begin
+            counter = 32'h00000000;
+            sclk = !sclk;
+        end
+    end 
+    
+endmodule
